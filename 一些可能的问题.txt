@@ -1,0 +1,4 @@
+运行程序时如果遇到运行错误或者提示内存不够，可以在run_nerf.py的main函数里关闭pytorch计算的梯度
+在if __name__ == '__main__'下面接一句torch.set_grad_enabled(False)，大大减少内存占用并提升运行速度
+
+关于trimesh库，如果在提取几何的时候需要用它，可以pip install trimesh，如果不需要可以直接把run_nerf.py里的第七行删掉import trimesh

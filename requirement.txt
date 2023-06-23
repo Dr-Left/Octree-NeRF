@@ -1,0 +1,9 @@
+numpy
+opencv-python
+torch
+icecream
+tqdm
+pyhocon
+scipy
+PyMCubes
+trimesh
