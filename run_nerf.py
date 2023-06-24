@@ -10,14 +10,16 @@ from tqdm import tqdm
 
 from models.fields import NeRF
 from models.my_dataset import Dataset
-from models.my_nerf import MyNeRF, CheatNeRF
+from models.my_nerf import MyNeRF, CheatNeRF, HighPerformanceNeRF
 from models.my_renderer import MyNerfRenderer
 
 os.environ['KMP_DUPLICATE_LIB_OK'] = 'True'
 
+RS = 256  # TODO: change to 256 later
+
 
 class Runner:
-    def __init__(self, conf_path, mode='render', case='CASE_NAME', is_continue=False):
+    def __init__(self, conf_path, mode='render', case='CASE_NAME', is_continue=False, high_performance=False):
         self.device = torch.device('cpu')
         # self.device = torch.device('cuda:0')
 
@@ -44,7 +46,7 @@ class Runner:
         # Networks
         self.coarse_nerf = NeRF(**self.conf['model.coarse_nerf']).to(self.device)
         self.fine_nerf = NeRF(**self.conf['model.fine_nerf']).to(self.device)
-        self.my_nerf = MyNeRF()
+        self.my_nerf = MyNeRF() if not high_performance else HighPerformanceNeRF()
         self.renderer = MyNerfRenderer(self.my_nerf,
                                        **self.conf['model.nerf_renderer'])
         self.load_checkpoint(
@@ -66,7 +68,7 @@ class Runner:
                                        **self.conf['model.nerf_renderer'])
 
     def save(self):
-        RS = 64
+        global RS
         pts_xyz = torch.zeros((RS, RS, RS, 3))
         for i in tqdm(range(RS)):
             for j in range(RS):
@@ -83,12 +85,22 @@ class Runner:
             sigma[batch:batch + batch_size] = net_sigma
             color[batch:batch + batch_size] = net_color
 
-        self.my_nerf.save(pts_xyz, sigma, color)
+        # save to the disk
+        checkpoint = {
+            "pts_xyz": pts_xyz,
+            "sigma": sigma,
+            "color": color,
+        }
+        torch.save(checkpoint, "pts_xyz_sigma_volume.pth")
+
+        return pts_xyz, sigma, color
+
+        # self.my_nerf.save(pts_xyz, sigma, color)
 
     def render_video(self):
         images = []
-        resolution_level = 4
-        n_frames = 90
+        resolution_level = 4  # TODO: change to 1 later
+        n_frames = 90  # TODO: change to 90
         for idx in tqdm(range(n_frames)):
             rays_o, rays_d = self.dataset.gen_rays_at(idx, resolution_level=resolution_level)
             H, W, _ = rays_o.shape
@@ -121,16 +133,26 @@ class Runner:
             os.makedirs(os.path.join(self.base_exp_dir, 'render'), exist_ok=True)
             cv.imwrite(os.path.join(self.base_exp_dir, 'render', '{}.jpg'.format(idx)), img_fine)
 
-        # fourcc = cv.VideoWriter_fourcc(*'mp4v')
-        # h, w, _ = images[0].shape
-        # writer = cv.VideoWriter(os.path.join(self.base_exp_dir,  'render', 'show.mp4'),
-        #                         fourcc, 30, (w, h))
-        # for image in tqdm(images):
-        #     writer.write(image)
-        # writer.release()
+        fourcc = cv.VideoWriter_fourcc(*'mp4v')
+        h, w, _ = images[0].shape
+        writer = cv.VideoWriter(os.path.join(self.base_exp_dir,  'render', 'show.mp4'),
+                                fourcc, 30, (w, h))
+        for image in tqdm(images):
+            writer.write(image)
+        writer.release()
+
+
+def load_from_disk():
+    checkpoint = torch.load("pts_xyz_sigma_volume.pth")
+    pts_xyz = checkpoint["pts_xyz"]
+    sigma = checkpoint["sigma"]
+    color = checkpoint["color"]
+    return pts_xyz, sigma, color
 
 
 if __name__ == '__main__':
+    torch.set_grad_enabled(False)
+    logging.getLogger().setLevel(logging.INFO)
 
     FORMAT = "[%(filename)s:%(lineno)s - %(funcName)20s() ] %(message)s"
     logging.basicConfig(level=logging.DEBUG, format=FORMAT)
@@ -142,13 +164,27 @@ if __name__ == '__main__':
     parser.add_argument('--is_continue', default=False, action="store_true")
     parser.add_argument('--case', type=str, default='')
     parser.add_argument('--dataroot', type=str, default='')
+    parser.add_argument('--high_performance', '-hp', default=False, action="store_true")
 
     args = parser.parse_args()
-    runner = Runner(args.conf, args.mode, args.case, args.is_continue)
+    runner = Runner(args.conf, args.mode, args.case, args.is_continue, args.high_performance)
 
     if args.mode == 'render':
-        runner.save()
-        runner.render_video()
+        # pts_xyz, sigma, color = runner.save()
+        pts_xyz, sigma, color = load_from_disk()
+        print(f'sigma: {sigma.shape}, color: {color.shape}')
+        logging.info('Ready to save')
+        while True:
+            logging.info('Begin saving')
+            init_refine = int(input("Input init_refine:"))
+            refine_depth = int(input("Input refine_depth:"))
+            if args.high_performance:
+                runner.my_nerf.save(pts_xyz, sigma, color, init_refine, refine_depth)
+            else:
+                runner.my_nerf.save(pts_xyz, sigma, color)
+            logging.info('End saving. Begin rendering')
+            runner.render_video()
+            logging.info('End rendering.')
     elif args.mode == 'test':
         runner.use_nerf()
         runner.render_video()
