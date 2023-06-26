@@ -197,4 +197,3 @@ self.volume_color = checkpoint["volume_color"]
 
 
 
-

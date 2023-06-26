@@ -67,7 +67,7 @@ class HighPerformanceNeRF(MyNeRF):
     def __init__(self):
         super(HighPerformanceNeRF, self).__init__()
 
-    def save(self, pts_xyz, sigma, color, init_refine=6, refine_depth=5):
+    def save(self, pts_xyz, sigma, color, init_refine=6, refine_depth=1):
         # self.debug_printing(pts_xyz, sigma, color)
         self.t = svox.N3Tree(data_dim=4,
                              data_format='RGBA',
